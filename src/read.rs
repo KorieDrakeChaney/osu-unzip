@@ -8,10 +8,11 @@ use std::{
 use byteorder::{LittleEndian, ReadBytesExt};
 use codepage_437::{FromCp437, CP437_CONTROL};
 use flate2::read::DeflateDecoder;
+use walkdir::WalkDir;
 
-use crate::constants::{
-    CENTRAL_DIRECTOR_BEGIN_SIGNATURE, CENTRAL_DIRECTOR_END_SIGNATURE, LOCAL_FILE_HEADER_SIGNATURE,
-};
+const CENTRAL_DIRECTOR_BEGIN_SIGNATURE: u32 = 0x02014b50;
+const CENTRAL_DIRECTOR_END_SIGNATURE: u32 = 0x06054b50;
+const LOCAL_FILE_HEADER_SIGNATURE: u32 = 0x04034b50;
 
 fn find_directory_end<T: Read + Seek>(reader: &mut T) -> std::io::Result<u64> {
     const HEADER_SIZE: u64 = 22;
@@ -48,7 +49,7 @@ fn find_directory_end<T: Read + Seek>(reader: &mut T) -> std::io::Result<u64> {
     ))
 }
 
-pub fn save_file<T: Read + Seek>(reader: &mut T, dir: PathBuf) -> std::io::Result<OsString> {
+fn save_file<T: Read + Seek>(reader: &mut T, dir: PathBuf) -> std::io::Result<OsString> {
     std::fs::create_dir_all(dir.clone())?;
 
     if reader.read_u32::<LittleEndian>()? != LOCAL_FILE_HEADER_SIGNATURE {
@@ -88,7 +89,7 @@ pub fn save_file<T: Read + Seek>(reader: &mut T, dir: PathBuf) -> std::io::Resul
     Ok(file_name.to_os_string())
 }
 
-pub fn get_local_headers<T: Read + Seek>(reader: &mut T) -> std::io::Result<HashMap<String, u64>> {
+fn get_local_headers<T: Read + Seek>(reader: &mut T) -> std::io::Result<HashMap<String, u64>> {
     let mut headers = HashMap::new();
 
     let central_directory_end = find_directory_end(reader)?;
@@ -139,7 +140,7 @@ pub fn get_local_headers<T: Read + Seek>(reader: &mut T) -> std::io::Result<Hash
     Ok(headers)
 }
 
-pub fn parse_osz(file: &str) -> std::io::Result<HashMap<String, OsString>> {
+pub fn unzip_osz(file: &str) -> std::io::Result<HashMap<String, OsString>> {
     let path = path::Path::new(file);
     if path.extension() != Some(OsStr::new("osz")) {
         return Err(std::io::Error::new(
@@ -168,4 +169,25 @@ pub fn parse_osz(file: &str) -> std::io::Result<HashMap<String, OsString>> {
 
         Ok(files)
     }
+}
+
+pub fn get_all_osu_maps() -> std::io::Result<HashMap<String, OsString>> {
+    let mut maps = HashMap::new();
+
+    let dir = dirs::data_local_dir().unwrap().join("osu!").join("Songs");
+
+    for entry in WalkDir::new(dir) {
+        let entry = entry?;
+        if entry.file_type().is_file() {
+            if entry.path().extension() == Some(OsStr::new("osu")) {
+                let file_name = entry.file_name().to_str().unwrap().to_string();
+                maps.insert(
+                    file_name,
+                    entry.path().to_path_buf().as_os_str().to_os_string(),
+                );
+            }
+        }
+    }
+
+    Ok(maps)
 }
